@@ -2,6 +2,7 @@
 
 ## 概述
 `SlideToggleButton` 是一个自定义 WPF 控件，用于表示开关状态。它结合了按钮点击和滑块滑动的交互方式，允许用户通过**点击**或**滑动**操作来切换开关状态。
+![SlideToggleButton 外观示例](SlideToggleButton.jpg)
 
 ## 核心功能
 1.  **状态切换**：通过点击或滑动操作改变 `IsChecked` 状态 (`true`/`false`)。
