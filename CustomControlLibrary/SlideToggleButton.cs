@@ -50,11 +50,7 @@ namespace CustomControlLibrary
         }
         public SlideToggleButton()
         {
-            Loaded += OnLoaded;
-            DragStarted += OnDragStarted;
-            DragCompleted += OnDragCompleted;
-            DragDelta += OnDragDelta;
-            Unloaded += OnUnloaded;
+            SubscribeEven();
             SetValue(ThumbTransformKey, new TranslateTransform(0, 0));
         }
         #region 依赖属性
@@ -131,7 +127,7 @@ namespace CustomControlLibrary
         }
 
         public static readonly DependencyProperty CheckedTrackColorProperty =
-            DependencyProperty.Register("CheckedTrackColor", typeof(Color), typeof(SlideToggleButton), new(defaultValue: Colors.Green));
+            DependencyProperty.Register("CheckedTrackColor", typeof(Color), typeof(SlideToggleButton), new(Colors.Green, OnTrackColorChanged));
         public Color CheckedTrackColor
         {
             get => (Color)GetValue(CheckedTrackColorProperty);
@@ -139,7 +135,7 @@ namespace CustomControlLibrary
         }
 
         public static readonly DependencyProperty UncheckedTrackColorProperty =
-            DependencyProperty.Register("UncheckedTrackColor", typeof(Color), typeof(SlideToggleButton), new(defaultValue: Colors.Gray));
+            DependencyProperty.Register("UncheckedTrackColor", typeof(Color), typeof(SlideToggleButton), new(Colors.Gray, OnTrackColorChanged));
         public Color UncheckedTrackColor
         {
             get => (Color)GetValue(UncheckedTrackColorProperty);
@@ -147,7 +143,7 @@ namespace CustomControlLibrary
         }
 
         public static readonly DependencyProperty ThumbColorProperty =
-            DependencyProperty.Register("ThumbColor", typeof(Color), typeof(SlideToggleButton), new(defaultValue: Colors.White));
+            DependencyProperty.Register("ThumbColor", typeof(Color), typeof(SlideToggleButton), new(Colors.White, OnThumbColorChanged));
         public Color ThumbColor
         {
             get => (Color)GetValue(ThumbColorProperty);
@@ -162,6 +158,14 @@ namespace CustomControlLibrary
         private double _dragDistanceMax;
         public static SlideToggleButtonHelper Helper { get; } = new();
         // 方法按照可能的执行顺序来排序
+        private void SubscribeEven()
+        {
+            Loaded += OnLoaded;
+            DragStarted += OnDragStarted;
+            DragCompleted += OnDragCompleted;
+            DragDelta += OnDragDelta;
+            Unloaded += OnUnloaded;
+        }
         public override void OnApplyTemplate()
         {
             base.OnApplyTemplate();
@@ -170,22 +174,38 @@ namespace CustomControlLibrary
         }
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            if (PART_Track != null)
-            {
-                if (PART_Track.Background is SolidColorBrush brush)
-                    brush.Color = IsChecked ? CheckedTrackColor : UncheckedTrackColor;
-            }
-            if (PART_Thumb != null)
-            {
-                if (PART_Thumb.Child is Shape shape)
-                    shape.Fill = new SolidColorBrush(ThumbColor);
-                else if (PART_Thumb.Child is Control control)
-                    control.Background = new SolidColorBrush(ThumbColor);
-                else if (PART_Thumb.Background is SolidColorBrush brush)
-                    brush.Color = ThumbColor;
-            }
+            UpdateTrackColor();
+            UpdateThumbColor();
+            AddPropertyChangedCallback();
             if (IsChecked)
                 UpdateVisualCheckState();
+        }
+        private void UpdateTrackColor()
+        {
+            if (PART_Track == null)
+                return;
+            if (PART_Track.Background is SolidColorBrush brush)
+                brush.Color = IsChecked ? CheckedTrackColor : UncheckedTrackColor;
+        }
+        private void UpdateThumbColor()
+        {
+            if (PART_Thumb == null)
+                return;
+            if (PART_Thumb.Child is Shape shape)
+                shape.Fill = new SolidColorBrush(ThumbColor);
+            else if (PART_Thumb.Child is Panel panel)
+                panel.Background = new SolidColorBrush(ThumbColor);
+            else if (PART_Thumb.Child is Control control)
+                control.Background = new SolidColorBrush(ThumbColor);
+            else if (PART_Thumb.Background is SolidColorBrush brush)
+                brush.Color = ThumbColor;
+        }
+        private void AddPropertyChangedCallback()
+        {
+            var descriptor = DependencyPropertyDescriptor.FromProperty(WidthProperty, typeof(FrameworkElement));
+            descriptor.AddValueChanged(this, OnSizeChanged);
+            descriptor = DependencyPropertyDescriptor.FromProperty(HeightProperty, typeof(FrameworkElement));
+            descriptor.AddValueChanged(this, OnSizeChanged);
         }
         protected override void OnMouseEnter(MouseEventArgs e)
         {
@@ -224,19 +244,27 @@ namespace CustomControlLibrary
                 return;
             // 拖拽距离小于阈值则触发点击，往正确的方向拖拽一定距离后触发滑动切换
             var oldValue = IsChecked;
-            var endPoint = Mouse.GetPosition(this);
-            double deltaX = endPoint.X - _dragStartPoint.X;
-            double deltaY = endPoint.Y - _dragStartPoint.Y;
-            double distance = deltaX * deltaX + deltaY * deltaY;
+            CheckDragResults();
+            if (oldValue == IsChecked)
+                UpdateVisualCheckState();
+            _isDragging = false;
+        }
+        private void CheckDragResults()
+        {
+            double distance = CalculateDistanceQuadratic();
             if (distance < 5 * 5)
                 OnClick();
             else if (ThumbTransform.X > (Width - Height) / 2)
                 IsChecked = true;
             else
                 IsChecked = false;
-            if (oldValue == IsChecked)
-                UpdateVisualCheckState();
-            _isDragging = false;
+        }
+        private double CalculateDistanceQuadratic()
+        {
+            var endPoint = Mouse.GetPosition(this);
+            double deltaX = endPoint.X - _dragStartPoint.X;
+            double deltaY = endPoint.Y - _dragStartPoint.Y;
+            return deltaX * deltaX + deltaY * deltaY;
         }
         protected virtual void OnClick()
         {
@@ -268,18 +296,24 @@ namespace CustomControlLibrary
         }
         private void UpdateVisualCheckState()
         {
+            if (!IsLoaded)
+                return;
             VisualStateManager.GoToState(this, "Reset", true); // 防止因重复值而动作失效
             if (IsChecked)
-            {
-                Helper.ThumbEndPoint = Width - Height;
-                Helper.CheckedTrackColor = CheckedTrackColor;
-                VisualStateManager.GoToState(this, "Checked", true);
-            }
+                GoToCheckedState();
             else
-            {
-                Helper.UncheckedTrackColor = UncheckedTrackColor;
-                VisualStateManager.GoToState(this, "Unchecked", true);
-            }
+                GoToUncheckedState();
+        }
+        private bool GoToCheckedState()
+        {
+            Helper.ThumbEndPoint = Width - Height;
+            Helper.CheckedTrackColor = CheckedTrackColor;
+            return VisualStateManager.GoToState(this, "Checked", true);
+        }
+        private bool GoToUncheckedState()
+        {
+            Helper.UncheckedTrackColor = UncheckedTrackColor;
+            return VisualStateManager.GoToState(this, "Unchecked", true);
         }
         private static void OnIsCheckedChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
@@ -350,13 +384,43 @@ namespace CustomControlLibrary
         {
             UpdateCanExecuteState();
         }
+        private static void OnTrackColorChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            var control = (SlideToggleButton)d;
+            control.UpdateVisualCheckState();
+        }
+        private static void OnThumbColorChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            var control = (SlideToggleButton)d;
+            if (control.IsLoaded)
+                control.UpdateThumbColor();
+        }
+        private void OnSizeChanged(object? sender, EventArgs e)
+        {
+            UpdateVisualCheckState();
+        }
         private void OnUnloaded(object s, RoutedEventArgs e)
         {
+            RemoveSubscribe();
+            RemovePropertyChangedCallback();
             // 控件卸载时移除事件监听
             if (Command != null)
-            {
                 CanExecuteChangedEventManager.RemoveHandler(Command, OnCanExecuteChanged);
-            }
+        }
+        private void RemoveSubscribe()
+        {
+            Loaded -= OnLoaded;
+            DragStarted -= OnDragStarted;
+            DragCompleted -= OnDragCompleted;
+            DragDelta -= OnDragDelta;
+            Unloaded -= OnUnloaded;
+        }
+        private void RemovePropertyChangedCallback()
+        {
+            var descriptor = DependencyPropertyDescriptor.FromProperty(WidthProperty, typeof(FrameworkElement));
+            descriptor.RemoveValueChanged(this, OnSizeChanged);
+            descriptor = DependencyPropertyDescriptor.FromProperty(HeightProperty, typeof(FrameworkElement));
+            descriptor.RemoveValueChanged(this, OnSizeChanged);
         }
         public class SlideToggleButtonHelper : INotifyPropertyChanged
         {
